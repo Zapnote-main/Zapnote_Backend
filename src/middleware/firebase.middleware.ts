@@ -1,13 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { firebaseAuth } from '../config/firebase.js';
 import  prisma  from '../config/db.js';
-import { redis } from '../config/redis.js';
+import { cache, CacheKeys, CACHE_TTL } from '../config/redis.js';
 
 
 declare global {
   namespace Express {
     interface Request {
-      userId: string;      
+      userId: string;
       userEmail?: string;
     }
   }
@@ -37,20 +37,24 @@ export async function authenticateFirebaseToken(
       });
     }
 
-    const cacheKey = `firebase_token:${idToken.slice(-20)}`; 
-    const cachedUserId = await redis.get<string>(cacheKey);
-
-    if (cachedUserId) {
-      req.userId = cachedUserId;
-      return next();
-    }
-
+    // Always verify. This used to be skipped whenever a cache entry keyed on the
+    // token's last 20 characters existed, which meant an expired or revoked token
+    // kept working for up to an hour. Verification is local (the Admin SDK caches
+    // Google's signing keys in process), so the round trip this saved was the
+    // database lookup below, which is what we cache now instead.
     const decodedToken = await firebaseAuth().verifyIdToken(idToken);
     const firebaseUid = decodedToken.uid;
     const email = decodedToken.email;
 
+    req.userId = firebaseUid;
+    if (email) req.userEmail = email;
 
-    await redis.set(cacheKey, firebaseUid, { ex: 3600 });
+    // Skip the user lookup for users we have already seen. Only ever a positive
+    // cache: an unknown user still falls through and gets created.
+    const existsKey = CacheKeys.userExists(firebaseUid);
+    if (await cache.get<boolean>(existsKey)) {
+      return next();
+    }
 
     let user = await prisma.user.findUnique({
       where: { id: firebaseUid },
@@ -67,8 +71,7 @@ export async function authenticateFirebaseToken(
       console.log(`New user created: ${user.id}`);
     }
 
-    req.userId = firebaseUid;
-    if (email) req.userEmail = email;
+    await cache.set(existsKey, true, CACHE_TTL.USER_EXISTS);
 
     next();
   } catch (error: any) {

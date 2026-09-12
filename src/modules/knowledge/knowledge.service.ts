@@ -1,10 +1,46 @@
 import prisma from '../../config/db.js';
-import { redis, CacheKeys, CACHE_TTL } from '../../config/redis.js';
+import { cache, CacheKeys, CACHE_TTL, parseCached } from '../../config/redis.js';
 import { socketEmit } from '../../config/socket.js';
 import { logger } from '../../utils/logger.js';
 import { NotFoundError } from '../../utils/error.js';
 import { ContentType, ProcessingStatus } from '@prisma/client';
 import { enqueueContentProcessing } from '../../services/queue/queue.service.js';
+
+/**
+ * Fields the list endpoint returns. Deliberately excludes `scrapedContent`, which
+ * holds the entire scraped article and was previously sent for every row even
+ * though nothing in the client reads it.
+ */
+const LIST_ITEM_SELECT = {
+  id: true,
+  sourceUrl: true,
+  userIntent: true,
+  summary: true,
+  contentType: true,
+  status: true,
+  errorMessage: true,
+  metadata: true,
+  workspaceId: true,
+  createdById: true,
+  createdAt: true,
+  updatedAt: true,
+  tags: {
+    select: {
+      addedByAI: true,
+      tag: { select: { id: true, name: true } },
+    },
+  },
+} as const;
+
+export type KnowledgeItemsPage = {
+  items: any[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+};
 
 function formatTags(tags: any[]) {
   return (tags || []).map((t: any) => ({
@@ -29,6 +65,12 @@ function maskUntilCompleted(item: any) {
 }
 
 
+/** Drops every cached list variant for this workspace in one command. */
+async function invalidateItemLists(workspaceId: string) {
+  await cache.bump(CacheKeys.workspaceItemsVersion(workspaceId));
+}
+
+
 export async function createKnowledgeItem(
   workspaceId: string,
   userId: string,
@@ -48,8 +90,8 @@ export async function createKnowledgeItem(
       },
     });
 
-    await redis.del(CacheKeys.workspaceItems(workspaceId));
-    
+    await invalidateItemLists(workspaceId);
+
     await enqueueContentProcessing(item.id);
 
     socketEmit.toWorkspace(workspaceId, 'knowledge:created', {
@@ -74,7 +116,7 @@ export async function getKnowledgeItems(
     type?: ContentType;
     status?: ProcessingStatus;
   }
-) {
+): Promise<KnowledgeItemsPage> {
   try {
     const { page, limit, type, status } = filters;
     const skip = (page - 1) * limit;
@@ -85,29 +127,35 @@ export async function getKnowledgeItems(
       ...(status && { status }),
     };
 
+    // One cache entry per filter combination, all tied to the workspace's current
+    // invalidation version so a single bump drops every variant.
+    const version = await cache.version(CacheKeys.workspaceItemsVersion(workspaceId));
+    const cacheKey = CacheKeys.workspaceItems(
+      workspaceId,
+      version,
+      `${page}:${limit}:${type ?? ''}:${status ?? ''}`
+    );
+
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      logger.debug(`Items cache HIT: ${cacheKey}`);
+      return parseCached<KnowledgeItemsPage>(cached);
+    }
+
+    logger.debug(`Items cache MISS: ${cacheKey}`);
+
     const [items, total] = await Promise.all([
       prisma.knowledgeItem.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-          tags: {
-            include: {
-              tag: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
+        select: LIST_ITEM_SELECT,
       }),
       prisma.knowledgeItem.count({ where }),
     ]);
 
- 
+
     const formattedItems = items.map((item: any) => {
       const formatted = {
         ...item,
@@ -117,7 +165,7 @@ export async function getKnowledgeItems(
       return maskUntilCompleted(formatted);
     });
 
-    return {
+    const result: KnowledgeItemsPage = {
       items: formattedItems,
       pagination: {
         page,
@@ -126,6 +174,10 @@ export async function getKnowledgeItems(
         totalPages: Math.ceil(total / limit),
       },
     };
+
+    await cache.set(cacheKey, result, CACHE_TTL.WORKSPACE_ITEMS);
+
+    return result;
   } catch (error) {
     logger.error('Error fetching knowledge items:', error);
     throw error;
@@ -192,7 +244,7 @@ export async function updateKnowledgeItem(
       data,
     });
 
-    await redis.del(CacheKeys.workspaceItems(workspaceId));
+    await invalidateItemLists(workspaceId);
 
     logger.info(`Knowledge item updated: ${itemId}`);
     return updated;
@@ -221,7 +273,7 @@ export async function deleteKnowledgeItem(itemId: string, workspaceId: string) {
       where: { id: existing.id },
     });
 
-    await redis.del(CacheKeys.workspaceItems(workspaceId));
+    await invalidateItemLists(workspaceId);
 
     socketEmit.toWorkspace(workspaceId, 'knowledge:deleted', {
       itemId,

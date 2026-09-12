@@ -2,11 +2,8 @@ import { Server as HTTPServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { firebaseAuth } from './firebase.js';
 import { logger } from '../utils/logger.js';
+import { corsOriginCheck } from './cors.js';
 
-const FRONTEND_URL = process.env.FRONTEND_URL || '*';
-if (!process.env.FRONTEND_URL) {
-  logger.warn('FRONTEND_URL not set; using wildcard "*" for Socket.IO CORS origin');
-} 
 
 export let io: SocketIOServer;
 
@@ -14,7 +11,9 @@ export let io: SocketIOServer;
 export function initializeSocketIO(httpServer: HTTPServer) {
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: FRONTEND_URL,
+      // Same policy as the HTTP API, so a client that can call the API can
+      // always open a socket too.
+      origin: corsOriginCheck,
       credentials: true,
     },
   });
