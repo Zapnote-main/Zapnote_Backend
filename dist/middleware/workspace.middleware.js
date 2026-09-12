@@ -1,4 +1,4 @@
-import { redis, CacheKeys, CACHE_TTL } from '../config/redis.js';
+import { cache, CacheKeys, CACHE_TTL } from '../config/redis.js';
 import prisma from '../config/db.js';
 import { ForbiddenError, NotFoundError } from '../utils/error.js';
 import { logger } from '../utils/logger.js';
@@ -10,7 +10,7 @@ export async function checkWorkspaceAccess(req, res, next) {
             throw new ForbiddenError('Missing workspace ID or user ID');
         }
         const cacheKey = CacheKeys.workspacePermissions(userId, workspaceId);
-        const cachedRole = await redis.get(cacheKey);
+        const cachedRole = await cache.get(cacheKey);
         if (cachedRole) {
             logger.debug(`Permission cache HIT: ${cacheKey}`);
             req.workspaceRole = cachedRole;
@@ -31,7 +31,7 @@ export async function checkWorkspaceAccess(req, res, next) {
         if (!member) {
             throw new ForbiddenError('Access denied to this workspace');
         }
-        await redis.set(cacheKey, member.role, { ex: CACHE_TTL.WORKSPACE_PERMISSIONS });
+        await cache.set(cacheKey, member.role, CACHE_TTL.WORKSPACE_PERMISSIONS);
         req.workspaceRole = member.role;
         next();
     }

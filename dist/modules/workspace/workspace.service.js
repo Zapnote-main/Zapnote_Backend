@@ -1,5 +1,5 @@
 import prisma from '../../config/db.js';
-import { redis, CacheKeys, CACHE_TTL } from '../../config/redis.js';
+import { cache, CacheKeys, CACHE_TTL } from '../../config/redis.js';
 import { logger } from '../../utils/logger.js';
 import { NotFoundError, ForbiddenError, ConflictError } from '../../utils/error.js';
 function parseCachedData(cached) {
@@ -29,7 +29,7 @@ export async function createWorkspace(userId, data) {
                 },
             },
         });
-        await redis.del(CacheKeys.userWorkspaces(userId));
+        await cache.del(CacheKeys.userWorkspaces(userId));
         logger.info(`Workspace created: ${workspace.id} by user: ${userId}`);
         return {
             ...workspace,
@@ -93,7 +93,7 @@ export async function updateWorkspace(workspaceId, data) {
             where: { workspaceId },
             select: { userId: true },
         });
-        await Promise.all(members.map((m) => redis.del(CacheKeys.userWorkspaces(m.userId))));
+        await Promise.all(members.map((m) => cache.del(CacheKeys.userWorkspaces(m.userId))));
         logger.info(`Workspace updated: ${workspaceId}`);
         return updated;
     }
@@ -112,9 +112,9 @@ export async function deleteWorkspace(workspaceId) {
             where: { id: workspaceId },
         });
         await Promise.all([
-            ...members.map((m) => redis.del(CacheKeys.userWorkspaces(m.userId))),
-            redis.del(CacheKeys.workspace(workspaceId)),
-            redis.del(CacheKeys.workspaceMembers(workspaceId)),
+            ...members.map((m) => cache.del(CacheKeys.userWorkspaces(m.userId))),
+            cache.del(CacheKeys.workspace(workspaceId)),
+            cache.del(CacheKeys.workspaceMembers(workspaceId)),
         ]);
         logger.info(`Workspace deleted: ${workspaceId}`);
     }
@@ -126,7 +126,7 @@ export async function deleteWorkspace(workspaceId) {
 export async function getWorkspaceMembers(workspaceId) {
     const cacheKey = CacheKeys.workspaceMembers(workspaceId);
     try {
-        const cached = await redis.get(cacheKey);
+        const cached = await cache.get(cacheKey);
         if (cached) {
             logger.debug(`Cache HIT: ${cacheKey}`);
             return parseCachedData(cached);
@@ -149,7 +149,7 @@ export async function getWorkspaceMembers(workspaceId) {
                 joinedAt: 'asc',
             },
         });
-        await redis.set(cacheKey, members, { ex: CACHE_TTL.WORKSPACE_LIST });
+        await cache.set(cacheKey, members, CACHE_TTL.WORKSPACE_LIST);
         return members;
     }
     catch (error) {
@@ -196,8 +196,8 @@ export async function addWorkspaceMember(workspaceId, email, role) {
             },
         });
         await Promise.all([
-            redis.del(CacheKeys.workspaceMembers(workspaceId)),
-            redis.del(CacheKeys.userWorkspaces(user.id)),
+            cache.del(CacheKeys.workspaceMembers(workspaceId)),
+            cache.del(CacheKeys.userWorkspaces(user.id)),
         ]);
         logger.info(`Member added to workspace: ${workspaceId}, user: ${user.id}`);
         return member;
@@ -228,8 +228,8 @@ export async function updateMemberRole(workspaceId, memberId, newRole) {
             },
         });
         await Promise.all([
-            redis.del(CacheKeys.workspaceMembers(workspaceId)),
-            redis.del(CacheKeys.workspacePermissions(updated.userId, workspaceId)),
+            cache.del(CacheKeys.workspaceMembers(workspaceId)),
+            cache.del(CacheKeys.workspacePermissions(updated.userId, workspaceId)),
         ]);
         logger.info(`Member role updated: ${memberId} to ${newRole}`);
         return updated;
@@ -252,9 +252,9 @@ export async function removeMember(workspaceId, memberId) {
             where: { id: memberId },
         });
         await Promise.all([
-            redis.del(CacheKeys.workspaceMembers(workspaceId)),
-            redis.del(CacheKeys.userWorkspaces(member.userId)),
-            redis.del(CacheKeys.workspacePermissions(member.userId, workspaceId)),
+            cache.del(CacheKeys.workspaceMembers(workspaceId)),
+            cache.del(CacheKeys.userWorkspaces(member.userId)),
+            cache.del(CacheKeys.workspacePermissions(member.userId, workspaceId)),
         ]);
         logger.info(`Member removed from workspace: ${workspaceId}, member: ${memberId}`);
     }
@@ -281,9 +281,9 @@ export async function leaveWorkspace(workspaceId, userId) {
             },
         });
         await Promise.all([
-            redis.del(CacheKeys.workspaceMembers(workspaceId)),
-            redis.del(CacheKeys.userWorkspaces(userId)),
-            redis.del(CacheKeys.workspacePermissions(userId, workspaceId)),
+            cache.del(CacheKeys.workspaceMembers(workspaceId)),
+            cache.del(CacheKeys.userWorkspaces(userId)),
+            cache.del(CacheKeys.workspacePermissions(userId, workspaceId)),
         ]);
         logger.info(`User left workspace: ${workspaceId}, user: ${userId}`);
     }

@@ -38,11 +38,7 @@ export async function createElement(req, res, next) {
         const { workspaceId, spaceId } = req.params;
         const { type, content } = req.body;
         const element = await whiteboardService.createElement(spaceId, type, content);
-        socketEmit.toWorkspace(workspaceId, 'element:created', {
-            spaceId,
-            element,
-        });
-        socketEmit.toSpace(spaceId, 'element:created', { element });
+        socketEmit.toSpace(spaceId, 'element:created', { spaceId, element });
         successResponse(res, element, 'Element created successfully', 201);
     }
     catch (error) {
@@ -54,11 +50,7 @@ export async function updateElement(req, res, next) {
         const { workspaceId, spaceId, elementId } = req.params;
         const { content } = req.body;
         const element = await whiteboardService.updateElement(elementId, spaceId, content);
-        socketEmit.toWorkspace(workspaceId, 'element:updated', {
-            spaceId,
-            element,
-        });
-        socketEmit.toSpace(spaceId, 'element:updated', { element });
+        socketEmit.toSpace(spaceId, 'element:updated', { spaceId, element });
         successResponse(res, element, 'Element updated successfully');
     }
     catch (error) {
@@ -69,11 +61,7 @@ export async function deleteElement(req, res, next) {
     try {
         const { workspaceId, spaceId, elementId } = req.params;
         await whiteboardService.deleteElement(elementId, spaceId);
-        socketEmit.toWorkspace(workspaceId, 'element:deleted', {
-            spaceId,
-            elementId,
-        });
-        socketEmit.toSpace(spaceId, 'element:deleted', { elementId });
+        socketEmit.toSpace(spaceId, 'element:deleted', { spaceId, elementId });
         successResponse(res, null, 'Element deleted successfully');
     }
     catch (error) {
@@ -85,11 +73,7 @@ export async function moveElement(req, res, next) {
         const { workspaceId, spaceId, elementId } = req.params;
         const { content } = req.body;
         const element = await whiteboardService.moveElement(elementId, spaceId, content);
-        socketEmit.toWorkspace(workspaceId, 'element:moved', {
-            spaceId,
-            element,
-        });
-        socketEmit.toSpace(spaceId, 'element:moved', { element });
+        socketEmit.toSpace(spaceId, 'element:moved', { spaceId, element });
         successResponse(res, element, 'Element moved successfully');
     }
     catch (error) {
