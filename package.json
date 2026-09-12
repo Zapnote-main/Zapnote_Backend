@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc && tsc-alias && npx prisma generate",
+    "test": "tsx --test tests/**/*.test.ts",
     "start": "node dist/server.js",
     "postinstall": "npx prisma generate",
     "prisma:generate": "npx prisma generate",
@@ -33,6 +34,7 @@
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "@types/cheerio": "^0.22.35",
+    "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.19",
     "@types/winston": "^2.4.4",
     "@upstash/qstash": "^2.8.4",
@@ -40,6 +42,7 @@
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cheerio": "^1.1.2",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",

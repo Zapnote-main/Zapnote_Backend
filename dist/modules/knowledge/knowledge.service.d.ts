@@ -1,4 +1,13 @@
 import { ContentType, ProcessingStatus } from '@prisma/client';
+export type KnowledgeItemsPage = {
+    items: any[];
+    pagination: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+    };
+};
 export declare function createKnowledgeItem(workspaceId: string, userId: string, data: {
     sourceUrl: string;
     userIntent?: string;
@@ -22,15 +31,7 @@ export declare function getKnowledgeItems(workspaceId: string, filters: {
     limit: number;
     type?: ContentType;
     status?: ProcessingStatus;
-}): Promise<{
-    items: any[];
-    pagination: {
-        page: number;
-        limit: number;
-        total: number;
-        totalPages: number;
-    };
-}>;
+}): Promise<KnowledgeItemsPage>;
 export declare function getKnowledgeItemById(itemId: string, workspaceId: string): Promise<any>;
 export declare function updateKnowledgeItem(itemId: string, workspaceId: string, data: {
     userIntent?: string;

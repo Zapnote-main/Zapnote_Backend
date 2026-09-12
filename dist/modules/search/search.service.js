@@ -1,5 +1,5 @@
 import prisma from '../../config/db.js';
-import { redis, CacheKeys, CACHE_TTL } from '../../config/redis.js';
+import { cache, CacheKeys, CACHE_TTL } from '../../config/redis.js';
 import { generateEmbeddingCached } from '../../services/ai/embedding.service.js';
 import { vectorSearch, hybridSearch } from '../../services/ai/vector.service.js';
 import { logger } from '../../utils/logger.js';
@@ -21,7 +21,7 @@ function applySimilarityPolicy(results) {
 export async function semanticSearch(query, workspaceId, limit = 20, filters) {
     const cacheKey = CacheKeys.searchResults(query, workspaceId);
     try {
-        const cached = await redis.get(cacheKey);
+        const cached = await cache.get(cacheKey);
         if (cached) {
             logger.debug(`Search cache HIT: ${query}`);
             return typeof cached === 'string' ? JSON.parse(cached) : cached;
@@ -60,7 +60,7 @@ export async function semanticSearch(query, workspaceId, limit = 20, filters) {
             results: finalResults,
             totalResults: finalResults.length,
         };
-        await redis.set(cacheKey, response, { ex: CACHE_TTL.SEARCH_RESULTS });
+        await cache.set(cacheKey, response, CACHE_TTL.SEARCH_RESULTS);
         logger.info(`Semantic search completed: ${filteredResults.length} results`);
         return response;
     }

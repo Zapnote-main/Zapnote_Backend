@@ -1,5 +1,5 @@
 import prisma from "../../config/db.js";
-import { redis, CacheKeys, CACHE_TTL } from "../../config/redis.js";
+import { cache, CacheKeys, CACHE_TTL } from "../../config/redis.js";
 import { logger } from '../../utils/logger.js';
 import { ConflictError } from '../../utils/error.js';
 function parseCachedData(cached) {
@@ -11,7 +11,7 @@ function parseCachedData(cached) {
 export async function getUserById(userId) {
     const cacheKey = CacheKeys.userProfile(userId);
     try {
-        const cached = await redis.get(cacheKey);
+        const cached = await cache.get(cacheKey);
         if (cached) {
             logger.debug(`Cache HIT: ${cacheKey}`);
             return parseCachedData(cached);
@@ -29,7 +29,7 @@ export async function getUserById(userId) {
             },
         });
         if (user) {
-            await redis.set(cacheKey, user, { ex: CACHE_TTL.USER_PROFILE });
+            await cache.set(cacheKey, user, CACHE_TTL.USER_PROFILE);
         }
         return user;
     }
@@ -64,7 +64,7 @@ export async function updateUserProfile(userId, data) {
                 createdAt: true,
             },
         });
-        await redis.del(CacheKeys.userProfile(userId));
+        await cache.del(CacheKeys.userProfile(userId));
         logger.info(`User profile updated: ${userId}`);
         return updated;
     }
@@ -106,7 +106,7 @@ export async function getUserStats(userId) {
 export async function getUserWorkspaces(userId) {
     const cacheKey = CacheKeys.userWorkspaces(userId);
     try {
-        const cached = await redis.get(cacheKey);
+        const cached = await cache.get(cacheKey);
         if (cached) {
             logger.debug(`Cache HIT: ${cacheKey}`);
             return parseCachedData(cached);
@@ -123,6 +123,12 @@ export async function getUserWorkspaces(userId) {
                         createdAt: true,
                         updatedAt: true,
                         ownerId: true,
+                        _count: {
+                            select: {
+                                members: true,
+                                items: true,
+                            },
+                        },
                     },
                 },
             },
@@ -130,13 +136,17 @@ export async function getUserWorkspaces(userId) {
                 joinedAt: 'desc',
             },
         });
-        //@ts-ignore
-        const result = workspaces.map((wm) => ({
-            ...wm.workspace,
-            role: wm.role,
-            joinedAt: wm.joinedAt,
-        }));
-        await redis.set(cacheKey, result, { ex: CACHE_TTL.WORKSPACE_LIST });
+        const result = workspaces.map((wm) => {
+            const { _count, ...workspace } = wm.workspace;
+            return {
+                ...workspace,
+                role: wm.role,
+                joinedAt: wm.joinedAt,
+                memberCount: _count.members,
+                itemCount: _count.items,
+            };
+        });
+        await cache.set(cacheKey, result, CACHE_TTL.WORKSPACE_LIST);
         return result;
     }
     catch (error) {
@@ -149,8 +159,8 @@ export async function deleteUser(userId) {
         await prisma.user.delete({
             where: { id: userId },
         });
-        await redis.del(CacheKeys.userProfile(userId));
-        await redis.del(CacheKeys.userWorkspaces(userId));
+        await cache.del(CacheKeys.userProfile(userId));
+        await cache.del(CacheKeys.userWorkspaces(userId));
         logger.info(`User deleted: ${userId}`);
     }
     catch (error) {

@@ -1,10 +1,12 @@
+import './config/env.js';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-dotenv.config();
+import compression from 'compression';
 
 import { initFirebase } from './config/firebase.js';
 import { testRedisConnection } from './config/redis.js';
+import { logQueueDriver } from './config/qstash.js';
+import { corsOriginCheck, logCorsPolicy } from './config/cors.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { logger } from './utils/logger.js';
 import prisma from './config/db.js';
@@ -16,11 +18,16 @@ import workspaceRoutes from './modules/workspace/workspace.route.js';
 import chatRoutes from './modules/chat/chat.route.js';
 import searchRoutes from './modules/search/search.route.js';
 import whiteboardRoutes from './modules/whiteboard/whiteboard.routes.js';
+import jobRoutes from './modules/jobs/jobs.route.js';
 
 const app = express();
 
 initFirebase();
 testRedisConnection();
+logQueueDriver();
+logCorsPolicy();
+
+app.use(compression());
 
 app.use(express.json({ 
   limit: '10mb',
@@ -30,23 +37,9 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  process.env.FRONTEND_URL, 
-].filter(Boolean);
-
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS blocked: ${origin}`));
-      }
-    },
+    origin: corsOriginCheck,
     credentials: true,
   })
 );
@@ -135,6 +128,10 @@ app.use('/api/v1/workspaces/:workspaceId/chat', chatRoutes);
 app.use('/api/v1/workspaces/:workspaceId/search', searchRoutes);
 app.use('/api/v1/workspaces/:workspaceId/spaces', whiteboardRoutes);
 app.use('/api/v1/knowledge', knowledgeRoutes);
+
+// Background jobs delivered by QStash. Mounted on its own path because it is
+// authenticated by the Upstash signature, not a Firebase token.
+app.use('/api/v1/jobs', jobRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
